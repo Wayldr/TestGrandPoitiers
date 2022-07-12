@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Grand Poitier</title>
+    <style type="text/css"> 
+        * {
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        canvas {
+            border: 1px solid black;
+        }
+
+        .container {
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        @media screen and (min-width: 767px) {
+            .container {
+                width: 707px;
+            }
+        }
+
+        @media screen and (min-width: 991px) {
+            .container {
+                width: 931px;
+            }
+        }
+
+        @media screen and (min-width: 1199px) {
+            .container {
+                width: 1139px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <canvas id="shapesCanvas" width="1000" height="300">
+            <!-- Repli pour les navigateurs ne supportant pas canva -->
+            Votre navigateur ne support pas cette fonctionnalitée. \n
+            Représentation graphique des résultats du premier tour des élections présidentielles 2022 à Poitiers.
+        </canvas>
+        <aside>
+            <ul class="list_result" id="list_result">
+            </ul>
+        </aside>
+    </div>
+</body>
+
+<script type="text/javascript">
+    //initialisation des variables
+    var xhttp = new XMLHttpRequest();
+    var canvas = document.getElementById('shapesCanvas');
+    var list_result = document.getElementById('list_result');
+    var resultByCandidate;
+    var nbCandidat = 12;//EVOULTION: calculer automatiquement le nombre de candidat.
+    var arrayColor = ["black", "red", "green", "darkSeaGreen", "blue", "orange", "grey", "blueviolet", "DeepPink", "DarkGoldenRod", "Aqua", "LightCoral"]//liste de couleur choisit arbitrairement. Il pourrait etre intéressant de récupérer les couleurs de la charte graphique de chaque candidat.
+    var nbVoteTotal=0; // permet de calculer le pourcentage de chaque candidat par la suite. C'est d'un point de vue algébrique plus simple que de travailler avec les pourcentages de chaque bureau de votes (qu'il faudrait pondérait par leur nombre de votant).
+
+    getResultFromApi();//récupère les données et les affiches
+
+
+    //définition des fonctions
+    function getResultFromApi() { //je n'ai pas opté pour fetch car cette fonctionnalité n'est pas encore supporté par tout les navigateurs.
+        xhttp.open("GET", "https://data.grandpoitiers.fr/api/records/1.0/search/?dataset=resultats_election_fichier_eirel_definitif&q=&rows=53", true);
+        xhttp.send();
+        xhttp.onreadystatechange = function () {
+            if (this.readyState == 4 && this.status == 200) {
+                apiResponse = JSON.parse(this.responseText);
+                resultByCandidate = extractResultByCandidate(apiResponse); // récupère les resultats pars candidat depuis la réponse de l'api
+                resultByCandidateFormated = formatedResult(resultByCandidate); // formate les résultats pour avoir toutes les infos nécessaire à mon affichage : pourcentage / couleur / trier par rang.
+                write(resultByCandidateFormated); // écrit la légende
+                draw(resultByCandidateFormated); // dessine les résultats dans le canvas
+            }
+        };
+    }
+
+    function extractResultByCandidate(dataFromApi) { // ici on récupère les résultats de tout les bureaux de vote pour calculer le résultat par candidat
+        // j'ai pris le parti de créer des objets pour chaque candidat ayant à minima un nom et un nombre de vote.
+        result = [];
+        dataFromApi.records.forEach((bureau, i) => { // pour chaque bureau on boucle sur tout les candidats.
+            for (let index = 1; index <= nbCandidat; index++) { 
+                if (i === 0) { // identifie la première itération du forEach  
+                    result.push({ 'name': bureau.fields["candidat_" + index], 'nbVote': 0 }); // et on enregistre le nom du candidat.
+                }
+                candidate = result.find(element => element.name === bureau.fields["candidat_" + index]); // récupère le candidat concerné
+                candidate.nbVote += bureau.fields["nb_voix_" + index]; // ajoute au candidat le nombre de vote du bureau
+            }
+            nbVoteTotal += bureau.fields.nb_exprimes;// met à jour le total à chaque passage
+        });
+        
+        return result;
+    }
+
+    function formatedResult(data) {
+        addPercentage(data);
+        data = sortByRank(data);
+        addColor(data);
+        return data;
+    }
+
+    function addPercentage(data) { // calcul le poucentage de chaque candidat et lui ajoute la propriété corespondante.
+        // le pourcentage est défini à partir du nombre de vote éxpimé (ne prend en compte ni les blancs, ni les nuls).
+        data.forEach(element => { 
+            result = element.nbVote / nbVoteTotal * 100 // calcul le pourcentage
+            resultRounded = Math.round(result * 100) / 100; // arrondi à 2 décimales
+            element.percentage = resultRounded;
+        });
+        return data;
+    }
+    function addColor(data) {
+        data.forEach((element, i) => {
+            element.color = arrayColor[i];
+        });
+    }
+
+    function sortByRank(data) {
+        // l'algo de calcul de la position est de complexité n².il n'est pas très efficace pour un grand échantillon mais très bien adapté à la situation 
+        sortedData = []; // tableau des candidats triés vide
+        data.forEach(element => {
+                // défini une position temporaire
+                position = 0;
+                data.forEach(el => { // compare l'élément traité à tout les autres elements ("el") du tableau
+                    if (el != element) { // sauf à lui meme
+                        if (el.nbVote > element.nbVote) { //si l'élement traité est inférieur à l'élément ("el") étudié j'incrémente sa position, exmple : si c'est le dernier il est incrémenté 11 fois, tout les autres étant plus grands
+                            position++;
+                        }
+                        if (el.nbVote === element.nbVote && element.name > el.name) { // cas d'égalité je classe par ordre alphabétique
+                            position++;
+                        }
+                    }
+                });
+                sortedData[position] = element;  
+        });
+        return sortedData;
+    }
+
+    function write(data) {
+        data.forEach((element, i) => {
+            addElementLi(element, list_result);
+        });
+    }
+
+    function addElementLi(data, target) { // j'évite l'emploi de innerHtml, pour des raisons de sécurité
+        li = document.createElement('li');
+        li.textContent = data.name + " : " + data.percentage + "%";
+        li.style.color = data.color;
+        target.appendChild(li);
+    }
+
+    function draw(data) {
+        if (!canvas.getContext) { // si le navigateur ne supporte pas canvas je quitte directement cette fonction
+            return;
+        }
+        var context = canvas.getContext('2d');
+
+        // tout les candidats sont représentés sur une seule ligne avec une hauteur identique : choix arbitraire pour une représentation facile à coder.
+        prevX = 0;
+        data.forEach(element => {
+            width = 1000 * element.percentage / 100;
+            context.fillStyle = element.color;
+            context.fillRect(prevX, 0, width, 300);
+            prevX += width;
+        });
+
+    }
+</script>
+
+</html>
